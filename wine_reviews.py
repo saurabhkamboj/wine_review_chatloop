@@ -39,6 +39,7 @@ class QueryClassification(BaseModel):
     min_price: Optional[float] = Field(default=None, description='The minimum price of the wine (null if not mentioned).')
     max_price: Optional[float] = Field(default=None, description='The maximum price of the wine (null if not mentioned).')
 
+# Classification
 def classify_query(query):
     response = client.responses.parse(
         model=LLM_MODEL,
@@ -98,6 +99,7 @@ def summarize_results_with_llm(query, results):
     )
     return response.output_text.strip()
 
+# Handling
 def handle_search(user_query, top_k = 10, min_similarity = 0.05):
     if not user_query.strip():
         return 'Please enter a search query.'
@@ -129,7 +131,7 @@ def handle_search(user_query, top_k = 10, min_similarity = 0.05):
 
     return summarize_results_with_llm(user_query, rows)
 
-# Create the Gradio interface
+# Interface
 with gr.Blocks(title="Wine review assistant") as demo:
     gr.Markdown("# 🍷 Wine review assistant")
     gr.Markdown("Search for relevant wine reviews using natural language queries.")
