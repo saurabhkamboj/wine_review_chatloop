@@ -1,3 +1,4 @@
+import os
 import gradio as gr
 from openai import OpenAI
 from pydantic import BaseModel, Field
@@ -14,7 +15,7 @@ LLM_MODEL = 'gpt-4o-mini'
 # Setup OTel via our convenience function
 tracer_provider = register(
     space_id = "U3BhY2U6Mjg0MDk6ZThCeA==", # in app space settings page
-    api_key = "ak-684107e1-0948-47f8-9c97-cfba6494b7d2-Z4VapuxjyGO8xB_dV8stsxNIkiE7FjOG", # in app space settings page
+    api_key = os.getenv("ARIZE_API_KEY"), # in app space settings page
     project_name = "wine_review_chatloop", # name this to whatever you would like
 )
 
