@@ -11,10 +11,6 @@ client = OpenAI()
 EMBEDDING_MODEL = 'text-embedding-3-small'
 LLM_MODEL = 'gpt-4o-mini'
 
-# Pydantic schema for classification
-from typing import Optional
-from pydantic import BaseModel, Field
-
 class QueryClassification(BaseModel):
     type: str = Field(
         description=(
