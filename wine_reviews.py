@@ -2,6 +2,7 @@ import json
 import gradio as gr
 from openai import OpenAI
 from pydantic import BaseModel, Field
+from typing import Optional
 from database_helper import search_reviews
 from dotenv import load_dotenv
 
@@ -11,11 +12,22 @@ EMBEDDING_MODEL = 'text-embedding-3-small'
 LLM_MODEL = 'gpt-4o-mini'
 
 # Pydantic schema for classification
+from typing import Optional
+from pydantic import BaseModel, Field
+
 class QueryClassification(BaseModel):
-    type: str = Field(description='The type of query "semantic" or "keyword". If the query mentions text-based attributes like country, province, variety, or description, set type="semantic". If it only specifies filters like price, points, or taster, set type="keyword". If both are present, use "semantic".')
-    taster_name: str = Field(default=None, description='The name of the taster')
-    points: int = Field(default=None, description='The points that the wine should have')
-    price: float = Field(default=None, description='The price of the wine')
+    type: str = Field(
+        description=(
+            "If the query mentions attributes like country, province, variety, or description, set type='semantic'. "
+            "If it only specifies filters like price, points, or a tasters' name, set type='keyword'. "
+            "If both are present, use 'semantic'."
+        )
+    )
+    taster_name: Optional[str] = Field(default=None, description='The name of the taster (null if not mentioned).')
+    min_points: Optional[int] = Field(default=None, description='The minimum points that the wine should have (null if not mentioned).')
+    max_points: Optional[int] = Field(default=None, description='The maximum points that the wine should have (null if not mentioned).')
+    min_price: Optional[float] = Field(default=None, description='The minimum price of the wine (null if not mentioned).')
+    max_price: Optional[float] = Field(default=None, description='The maximum price of the wine (null if not mentioned).')
 
 def classify_query(query):
     response = client.responses.parse(
@@ -23,12 +35,13 @@ def classify_query(query):
         input=[
             {
                 'role': 'system',
-                'content': 'Extract information from the query required to classify it'
+                'content': 'Extract information required to classify the query'
             },
             {'role': 'user', 'content': query}
         ],
         text_format=QueryClassification
     )
+    print(response.output_parsed)
     return response.output_parsed
 
 # Embedding
@@ -75,7 +88,7 @@ def summarize_results_with_llm(query, results):
     )
     return response.output_text.strip()
 
-def handle_search(user_query, top_k = 10, min_similarity = 0.5):
+def handle_search(user_query, top_k = 10, min_similarity = 0.05):
     if not user_query.strip():
         return 'Please enter a search query.'
 
@@ -88,16 +101,20 @@ def handle_search(user_query, top_k = 10, min_similarity = 0.5):
             top_k=top_k,
             min_similarity=min_similarity,
             taster_name=classification.taster_name,
-            points=classification.points,
-            price=classification.price
+            min_points=classification.min_points,
+            max_points=classification.max_points,
+            min_price=classification.min_price,
+            max_price=classification.max_price
         )
     else:
         rows = search_reviews(
             query_embedding=None,
             top_k=top_k,
             taster_name=classification.taster_name,
-            points=classification.points,
-            price=classification.price
+            min_points=classification.min_points,
+            max_points=classification.max_points,
+            min_price=classification.min_price,
+            max_price=classification.max_price
         )
 
     return summarize_results_with_llm(user_query, rows)
@@ -131,5 +148,4 @@ with gr.Blocks(title="Wine review assistant") as demo:
         outputs=results_output
     )
 
-if __name__ == "__main__":
-    demo.launch()
+demo.launch()

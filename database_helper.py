@@ -8,8 +8,8 @@ def get_conn():
         database="wine_reviews"
     )
 
-def search_reviews(query_embedding=None, top_k=10, min_similarity=0.5,
-                    taster_name=None, points=None, price=None):
+def search_reviews(query_embedding=None, top_k=10, min_similarity=0.05, taster_name=None,
+                   min_points=None, max_points=None, min_price=None, max_price=None):
     select_cols = (
         'id, title, variety, winery, country, province, description, '
         'points, price, taster_name, taster_twitter_handle'
@@ -17,40 +17,48 @@ def search_reviews(query_embedding=None, top_k=10, min_similarity=0.5,
 
     if query_embedding is not None:
         sql = f"""
-        SELECT
-            {select_cols},
-            1 - (embedding <=> %s::vector) AS similarity
-        FROM reviews
-        WHERE (%s IS NULL OR LOWER(taster_name) = LOWER(%s))
-            AND (%s IS NULL OR points = %s)
-            AND (%s IS NULL OR price = %s)
+            SELECT
+                {select_cols},
+                1 - (embedding <=> %s::vector) AS similarity
+            FROM reviews
+            WHERE (LOWER(taster_name) = LOWER(COALESCE(%s, taster_name)))
+            AND (points >= COALESCE(%s, points))
+            AND (points <= COALESCE(%s, points))
+            AND (price  >= COALESCE(%s, price))
+            AND (price  <= COALESCE(%s, price))
             AND 1 - (embedding <=> %s::vector) > %s
-        ORDER BY embedding <=> %s::vector
-        LIMIT %s;
+            ORDER BY embedding <=> %s::vector
+            LIMIT %s;
         """
         params = [
             query_embedding,
-            taster_name, taster_name,
-            points, points,
-            price, price,
+            taster_name,
+            min_points,
+            max_points,
+            min_price,
+            max_price,
             query_embedding, min_similarity,
             query_embedding, top_k
         ]
     else:
         sql = f"""
-        SELECT
-            {select_cols}
-        FROM reviews
-        WHERE (%s IS NULL OR LOWER(taster_name) = LOWER(%s))
-            AND (%s IS NULL OR points = %s)
-            AND (%s IS NULL OR price = %s)
-        ORDER BY points DESC NULLS LAST, price NULLS LAST
-        LIMIT %s;
+            SELECT
+                {select_cols}
+            FROM reviews
+            WHERE (LOWER(taster_name) = LOWER(COALESCE(%s, taster_name)))
+            AND (points >= COALESCE(%s, points))
+            AND (points <= COALESCE(%s, points))
+            AND (price  >= COALESCE(%s, price))
+            AND (price  <= COALESCE(%s, price))
+            ORDER BY points DESC NULLS LAST, price NULLS LAST
+            LIMIT %s;
         """
         params = [
-            taster_name, taster_name,
-            points, points,
-            price, price,
+            taster_name,
+            min_points,
+            max_points,
+            min_price,
+            max_price,
             top_k
         ]
 
