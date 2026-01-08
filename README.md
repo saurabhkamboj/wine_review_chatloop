@@ -1,4 +1,4 @@
-# Wine Review Chatbot
+# Wine-review chatbot
 
 A semantic search chatbot for exploring wine reviews.
 
