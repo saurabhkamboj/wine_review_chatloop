@@ -5,25 +5,11 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from database_helper import search_reviews
 from dotenv import load_dotenv
-from arize.otel import register
 
 load_dotenv()
 client = OpenAI()
 EMBEDDING_MODEL = 'text-embedding-3-small'
 LLM_MODEL = 'gpt-4o-mini'
-
-# Setup OTel via our convenience function
-tracer_provider = register(
-    space_id = "U3BhY2U6Mjg0MDk6ZThCeA==", # in app space settings page
-    api_key = os.getenv("ARIZE_API_KEY"), # in app space settings page
-    project_name = "wine_review_chatloop", # name this to whatever you would like
-)
-
-# Import the automatic instrumentor from OpenInference
-from openinference.instrumentation.openai import OpenAIInstrumentor
-
-# Finish automatic instrumentation
-OpenAIInstrumentor().instrument(tracer_provider=tracer_provider)
 
 class QueryClassification(BaseModel):
     type: str = Field(
