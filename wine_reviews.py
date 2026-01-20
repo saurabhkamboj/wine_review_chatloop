@@ -1,4 +1,4 @@
-import os
+import time
 import gradio as gr
 from openai import OpenAI
 from pydantic import BaseModel, Field
@@ -114,11 +114,23 @@ def handle_search(user_query, top_k = 10, min_similarity = 0.05):
     if not user_query.strip():
         return 'Please enter a search query.'
 
+    timings = {}
+    total_start = time.perf_counter()
+
+    start = time.perf_counter()
     memories = get_relevant_memories(user_query)
+    timings['Memory search'] = time.perf_counter() - start
+
+    start = time.perf_counter()
     classification = classify_query(user_query)
+    timings['Classification'] = time.perf_counter() - start
 
     if classification.type == 'semantic':
+        start = time.perf_counter()
         embedding = embed_query_text(user_query)
+        timings['Embedding'] = time.perf_counter() - start
+
+        start = time.perf_counter()
         rows = search_reviews(
             query_embedding=embedding,
             top_k=top_k,
@@ -129,7 +141,11 @@ def handle_search(user_query, top_k = 10, min_similarity = 0.05):
             min_price=classification.min_price,
             max_price=classification.max_price
         )
+        timings['DB retrieval'] = time.perf_counter() - start
     else:
+        timings['Embedding'] = None
+
+        start = time.perf_counter()
         rows = search_reviews(
             query_embedding=None,
             top_k=top_k,
@@ -139,38 +155,82 @@ def handle_search(user_query, top_k = 10, min_similarity = 0.05):
             min_price=classification.min_price,
             max_price=classification.max_price
         )
+        timings['DB retrieval'] = time.perf_counter() - start
 
+    start = time.perf_counter()
     response = summarize_results_with_llm(user_query, rows, memories)
+    timings['Summarization'] = time.perf_counter() - start
+
+    start = time.perf_counter()
     store_interaction(user_query, response)
-    return response
+    timings['Memory store'] = time.perf_counter() - start
+
+    timings['Total'] = time.perf_counter() - total_start
+
+    return format_response_with_timings(response, timings)
+
+def format_duration(seconds):
+    if seconds >= 1:
+        return f'{seconds:.2f}s'
+    return f'{seconds * 1000:.0f}ms'
+
+def format_response_with_timings(response, timings):
+    timing_rows = []
+    for step, duration in timings.items():
+        if step == 'Total':
+            continue
+        if duration is None:
+            timing_rows.append(f'| {step} | N/A |')
+        else:
+            timing_rows.append(f'| {step} | {format_duration(duration)} |')
+    timing_rows.append(f'| **Total** | **{format_duration(timings["Total"])}** |')
+
+    timing_table = '\n'.join([
+        '',
+        '---',
+        '**Timing Breakdown**',
+        '| Step | Time |',
+        '|------|------|',
+        *timing_rows
+    ])
+
+    return response + timing_table
 
 # Interface
-with gr.Blocks(title="Wine review assistant") as demo:
-    gr.Markdown("# 🍷 Wine review assistant")
-    gr.Markdown("Search for relevant wine reviews using natural language queries.")
-    
-    with gr.Row():
-        with gr.Column():
-            query_input = gr.Textbox(
-                label="Search Query",
-                placeholder="Enter your search query here...",
-                lines=2
-            )
-            search_button = gr.Button("Search", variant="primary")
-        
-        with gr.Column():
-            results_output = gr.Markdown(label="Results")
+with gr.Blocks(title="Wine Review Assistant") as demo:
+    gr.Markdown("# Wine Review Assistant")
+    gr.Markdown("Search for wines by describing what you're looking for - variety, region, taste profile, price range, or rating.")
+
+    query_input = gr.Textbox(
+        label="Search Query",
+        placeholder="e.g., A fruity red wine from California under $30",
+        lines=2
+    )
+    search_button = gr.Button("Search", variant="primary")
+    results_output = gr.Markdown(label="Results")
 
     search_button.click(
         fn=handle_search,
         inputs=[query_input],
         outputs=results_output
+    ).then(
+        fn=lambda: gr.update(interactive=True),
+        outputs=search_button
     )
 
     query_input.submit(
         fn=handle_search,
         inputs=[query_input],
         outputs=results_output
+    ).then(
+        fn=lambda: gr.update(interactive=True),
+        outputs=search_button
+    )
+
+    # Disable button while loading
+    search_button.click(
+        fn=lambda: gr.update(interactive=False),
+        outputs=search_button
     )
 
 demo.launch()
