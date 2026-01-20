@@ -14,6 +14,7 @@ llm_client = OpenAI()
 memory_client = MemoryClient()
 EMBEDDING_MODEL = 'text-embedding-3-small'
 LLM_MODEL = 'gpt-4.1-nano'
+VISION_MODEL = 'gpt-4.1-mini'
 USER_ID = 'wine-user-1'
 
 class QueryClassification(BaseModel):
@@ -39,11 +40,20 @@ def get_relevant_memories(query):
     memory_texts = [m['memory'] for m in memories['results']]
     return '\n'.join(f'- {text}' for text in memory_texts)
 
-def store_interaction(query, response):
-    messages = [
-        {'role': 'user', 'content': query},
-        {'role': 'assistant', 'content': response}
-    ]
+def store_interaction(query, response, image_url=None, image_description=None):
+    text_content = query
+    if image_description:
+        text_content = f'{query}\n\n[Image: {image_url}]\nImage description: {image_description}'
+    messages = [{'role': 'user', 'content': text_content}]
+    if image_url:
+        messages.append({
+            'role': 'user',
+            'content': {
+                'type': 'image_url',
+                'image_url': {'url': image_url}
+            }
+        })
+    messages.append({'role': 'assistant', 'content': response})
     memory_client.add(messages, user_id=USER_ID)
 
 # Classification
@@ -59,8 +69,24 @@ def classify_query(query):
         ],
         text_format=QueryClassification
     )
-    print(response.output_parsed)
     return response.output_parsed
+
+# Image description
+def describe_image(image_url):
+    response = llm_client.responses.create(
+        model=VISION_MODEL,
+        input=[
+            {
+                'role': 'user',
+                'content': [
+                    {'type': 'input_text', 'text': 'Describe this wine image briefly. Focus on: wine type, color, label details, region/origin if visible. Keep it concise.'},
+                    {'type': 'input_image', 'image_url': image_url}
+                ]
+            }
+        ],
+        max_output_tokens=150
+    )
+    return response.output_text.strip()
 
 # Embedding
 def embed_query_text(text):
@@ -70,13 +96,18 @@ def embed_query_text(text):
     return resp.data[0].embedding
 
 # Summarization
-def summarize_results_with_llm(query, results, memories=''):
-    memory_context = f"User preferences from past interactions:\n{memories}\n\n" if memories else ''
+def summarize_results_with_llm(query, results, memories='', image_description=None):
+    context_sections = []
+    if memories:
+        context_sections.append(f'## Memory Context\nUser preferences from past interactions:\n{memories}')
+    if image_description:
+        context_sections.append(f'## Image Context\nUser provided an image showing: {image_description}')
+    context_text = '\n\n'.join(context_sections) + '\n\n' if context_sections else ''
 
     if not results:
         input_text = (
-            f"{memory_context}"
-            f"User query: {query}\n\n"
+            f"{context_text}"
+            f"## User Query\n{query}\n\n"
             "No search results were found. Reply in natural language saying no close matches were found "
             "and suggest trying different keywords."
         )
@@ -84,16 +115,23 @@ def summarize_results_with_llm(query, results, memories=''):
         lines = []
         for index, row in enumerate(results, start=1):
             price_str = f'${row["price"]}' if row["price"] else 'N/A'
+            location = ', '.join(filter(None, [row.get("province"), row.get("country")]))
+            reviewer = row.get("taster_name") or 'Unknown'
+            variety = row.get("variety") or 'N/A'
+            description = row.get("description") or ''
+
             lines.append(
-                f'{index}. {row["title"]} ({row["winery"]}) - '
-                f'{row["country"]} | {row["points"]}pts, {price_str}'
+                f'{index}. **{row["title"]}** ({row["winery"]})\n'
+                f'   Variety: {variety} | Location: {location}\n'
+                f'   Points: {row["points"]} | Price: {price_str} | Reviewer: {reviewer}\n'
+                f'   Description: {description}'
             )
-        results_text = '\n'.join(lines)
+        results_text = '\n\n'.join(lines)
         input_text = (
-            f"{memory_context}"
-            f"User query: {query}\n\n"
-            f"Results:\n{results_text}\n\n"
-            "Summarize briefly: highlight top matches, note price/rating trends, recommend one to try first."
+            f"{context_text}"
+            f"## User Query\n{query}\n\n"
+            f"## Search Results\n{results_text}\n\n"
+            "Summarize the results based on the user query and memory context. Include relevant details like variety, location, reviewer/taster name, price, and points. If memory indicates user preferences (e.g., wanting taster names), ensure those are included in your response."
         )
 
     response = llm_client.responses.create(
@@ -104,16 +142,30 @@ def summarize_results_with_llm(query, results, memories=''):
     return response.output_text.strip()
 
 # Handling
-def handle_search(user_query, top_k = 10, min_similarity = 0.05):
+def handle_search(user_query, image_url='', top_k=10, min_similarity=0.05):
     if not user_query.strip():
         return 'Please enter a search query.'
 
+    image_url = image_url.strip() if image_url else None
+
     timings = {}
     total_start = time.perf_counter()
+    image_description = None
+    memories = ''
 
+    # Get image description
+    if image_url:
+        start = time.perf_counter()
+        image_description = describe_image(image_url)
+        timings['Image description'] = time.perf_counter() - start
+
+    # Build memory search query
+    memory_query = f'{user_query} {image_description}' if image_description else user_query
+
+    # Memory search and classification
     def timed_memory_search():
         start = time.perf_counter()
-        result = get_relevant_memories(user_query)
+        result = get_relevant_memories(memory_query)
         timings['Memory search'] = time.perf_counter() - start
         return result
 
@@ -129,9 +181,18 @@ def handle_search(user_query, top_k = 10, min_similarity = 0.05):
         memories = memory_future.result()
         classification = classify_future.result()
 
-    if classification.type == 'semantic':
+    # Build search text
+    search_components = [user_query]
+    if image_description:
+        search_components.append(image_description)
+    if memories:
+        search_components.append(memories)
+    search_text = ' '.join(search_components)
+
+    # Embedding and DB search
+    if classification.type == 'semantic' or image_description or memories:
         start = time.perf_counter()
-        embedding = embed_query_text(user_query)
+        embedding = embed_query_text(search_text)
         timings['Embedding'] = time.perf_counter() - start
 
         start = time.perf_counter()
@@ -162,13 +223,13 @@ def handle_search(user_query, top_k = 10, min_similarity = 0.05):
         timings['DB retrieval'] = time.perf_counter() - start
 
     start = time.perf_counter()
-    response = summarize_results_with_llm(user_query, rows, memories)
+    response = summarize_results_with_llm(user_query, rows, memories, image_description)
     timings['Summarization'] = time.perf_counter() - start
 
     timings['Total'] = time.perf_counter() - total_start
 
     executor = ThreadPoolExecutor(max_workers=1)
-    executor.submit(store_interaction, user_query, response)
+    executor.submit(store_interaction, user_query, response, image_url, image_description)
     executor.shutdown(wait=False)
 
     return format_response_with_timings(response, timings)
@@ -210,12 +271,17 @@ with gr.Blocks(title="Wine Review Assistant") as demo:
         placeholder="e.g., A fruity red wine from California under $30",
         lines=2
     )
+    image_url_input = gr.Textbox(
+        label="Image URL (optional)",
+        placeholder="https://example.com/wine-label.jpg",
+        lines=1
+    )
     search_button = gr.Button("Search", variant="primary")
     results_output = gr.Markdown(label="Results")
 
     search_button.click(
         fn=handle_search,
-        inputs=[query_input],
+        inputs=[query_input, image_url_input],
         outputs=results_output
     ).then(
         fn=lambda: gr.update(interactive=True),
@@ -224,7 +290,7 @@ with gr.Blocks(title="Wine Review Assistant") as demo:
 
     query_input.submit(
         fn=handle_search,
-        inputs=[query_input],
+        inputs=[query_input, image_url_input],
         outputs=results_output
     ).then(
         fn=lambda: gr.update(interactive=True),
