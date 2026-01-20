@@ -5,9 +5,11 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from database_helper import search_reviews
 from dotenv import load_dotenv
+from mem0 import MemoryClient
 
 load_dotenv()
-client = OpenAI()
+llm_client = OpenAI()
+memory_client = MemoryClient()
 EMBEDDING_MODEL = 'text-embedding-3-small'
 LLM_MODEL = 'gpt-4o-mini'
 
@@ -27,7 +29,7 @@ class QueryClassification(BaseModel):
 
 # Classification
 def classify_query(query):
-    response = client.responses.parse(
+    response = llm_client.responses.parse(
         model=LLM_MODEL,
         input=[
             {
@@ -43,7 +45,7 @@ def classify_query(query):
 
 # Embedding
 def embed_query_text(text):
-    resp = client.embeddings.create(
+    resp = llm_client.embeddings.create(
         model=EMBEDDING_MODEL,
         input=text)
     return resp.data[0].embedding
@@ -78,7 +80,7 @@ def summarize_results_with_llm(query, results):
             "Respond with a short descriptive paragraph followed by a concise numbered recommendation list."
         )
 
-    response = client.responses.create(
+    response = llm_client.responses.create(
         model=LLM_MODEL,
         input=input_text,
         max_output_tokens=700
