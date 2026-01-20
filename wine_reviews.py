@@ -12,6 +12,7 @@ llm_client = OpenAI()
 memory_client = MemoryClient()
 EMBEDDING_MODEL = 'text-embedding-3-small'
 LLM_MODEL = 'gpt-4o-mini'
+USER_ID = 'wine-user-1'
 
 class QueryClassification(BaseModel):
     type: str = Field(
@@ -26,6 +27,21 @@ class QueryClassification(BaseModel):
     max_points: Optional[int] = Field(default=None, description='The maximum points that the wine should have (null if not mentioned).')
     min_price: Optional[float] = Field(default=None, description='The minimum price of the wine (null if not mentioned).')
     max_price: Optional[float] = Field(default=None, description='The maximum price of the wine (null if not mentioned).')
+
+# Memory
+def get_relevant_memories(query):
+    memories = memory_client.search(query, user_id=USER_ID, limit=5)
+    if not memories.get('results'):
+        return ''
+    memory_texts = [m['memory'] for m in memories['results']]
+    return '\n'.join(f'- {text}' for text in memory_texts)
+
+def store_interaction(query, response):
+    messages = [
+        {'role': 'user', 'content': query},
+        {'role': 'assistant', 'content': response}
+    ]
+    memory_client.add(messages, user_id=USER_ID)
 
 # Classification
 def classify_query(query):
@@ -51,9 +67,12 @@ def embed_query_text(text):
     return resp.data[0].embedding
 
 # Summarization
-def summarize_results_with_llm(query, results):
+def summarize_results_with_llm(query, results, memories=''):
+    memory_context = f"User preferences from past interactions:\n{memories}\n\n" if memories else ''
+
     if not results:
         input_text = (
+            f"{memory_context}"
             f"User query: {query}\n\n"
             "No search results were found. Reply in natural language saying no close matches were found "
             "and suggest trying different keywords."
@@ -71,11 +90,13 @@ def summarize_results_with_llm(query, results):
             )
         results_text = '\n'.join(lines)
         input_text = (
+            f"{memory_context}"
             f"User query: {query}\n\n"
             f"Found {len(results)} similar wine reviews. Provide a short human-friendly summary that:\n"
             "1) highlights the most relevant wines and why they match the query,\n"
             "2) mentions regions, points, and price trends if visible,\n"
-            "3) suggests which wine the user should explore first based on intent.\n\n"
+            "3) suggests which wine the user should explore first based on intent,\n"
+            "4) takes into account the user's preferences if available.\n\n"
             f"Results:\n{results_text}\n\n"
             "Respond with a short descriptive paragraph followed by a concise numbered recommendation list."
         )
@@ -92,6 +113,7 @@ def handle_search(user_query, top_k = 10, min_similarity = 0.05):
     if not user_query.strip():
         return 'Please enter a search query.'
 
+    memories = get_relevant_memories(user_query)
     classification = classify_query(user_query)
 
     if classification.type == 'semantic':
@@ -117,7 +139,9 @@ def handle_search(user_query, top_k = 10, min_similarity = 0.05):
             max_price=classification.max_price
         )
 
-    return summarize_results_with_llm(user_query, rows)
+    response = summarize_results_with_llm(user_query, rows, memories)
+    store_interaction(user_query, response)
+    return response
 
 # Interface
 with gr.Blocks(title="Wine review assistant") as demo:
