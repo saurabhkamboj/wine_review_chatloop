@@ -1,4 +1,5 @@
 import time
+from concurrent.futures import ThreadPoolExecutor
 import gradio as gr
 from openai import OpenAI
 from pydantic import BaseModel, Field
@@ -12,7 +13,7 @@ init_pool()
 llm_client = OpenAI()
 memory_client = MemoryClient()
 EMBEDDING_MODEL = 'text-embedding-3-small'
-LLM_MODEL = 'gpt-4o-mini'
+LLM_MODEL = 'gpt-4.1-nano'
 USER_ID = 'wine-user-1'
 
 class QueryClassification(BaseModel):
@@ -82,31 +83,23 @@ def summarize_results_with_llm(query, results, memories=''):
     else:
         lines = []
         for index, row in enumerate(results, start=1):
-            similarity = f'{row["similarity"]:.3f}' if row["similarity"] is not None else "N/A"
+            price_str = f'${row["price"]}' if row["price"] else 'N/A'
             lines.append(
-                f'{index}. {row["title"]} — {row["winery"]} '
-                f'({row["country"]}, {row["province"]}) | '
-                f'Points: {row["points"]}, Price: {row["price"]} | '
-                f'Taster: {row["taster_name"] or "N/A"} '
-                f'[similarity={similarity}]'
+                f'{index}. {row["title"]} ({row["winery"]}) - '
+                f'{row["country"]} | {row["points"]}pts, {price_str}'
             )
         results_text = '\n'.join(lines)
         input_text = (
             f"{memory_context}"
             f"User query: {query}\n\n"
-            f"Found {len(results)} similar wine reviews. Provide a short human-friendly summary that:\n"
-            "1) highlights the most relevant wines and why they match the query,\n"
-            "2) mentions regions, points, and price trends if visible,\n"
-            "3) suggests which wine the user should explore first based on intent,\n"
-            "4) takes into account the user's preferences if available.\n\n"
             f"Results:\n{results_text}\n\n"
-            "Respond with a short descriptive paragraph followed by a concise numbered recommendation list."
+            "Summarize briefly: highlight top matches, note price/rating trends, recommend one to try first."
         )
 
     response = llm_client.responses.create(
         model=LLM_MODEL,
         input=input_text,
-        max_output_tokens=700
+        max_output_tokens=450
     )
     return response.output_text.strip()
 
@@ -118,13 +111,23 @@ def handle_search(user_query, top_k = 10, min_similarity = 0.05):
     timings = {}
     total_start = time.perf_counter()
 
-    start = time.perf_counter()
-    memories = get_relevant_memories(user_query)
-    timings['Memory search'] = time.perf_counter() - start
+    def timed_memory_search():
+        start = time.perf_counter()
+        result = get_relevant_memories(user_query)
+        timings['Memory search'] = time.perf_counter() - start
+        return result
 
-    start = time.perf_counter()
-    classification = classify_query(user_query)
-    timings['Classification'] = time.perf_counter() - start
+    def timed_classify():
+        start = time.perf_counter()
+        result = classify_query(user_query)
+        timings['Classification'] = time.perf_counter() - start
+        return result
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        memory_future = executor.submit(timed_memory_search)
+        classify_future = executor.submit(timed_classify)
+        memories = memory_future.result()
+        classification = classify_future.result()
 
     if classification.type == 'semantic':
         start = time.perf_counter()
@@ -162,11 +165,11 @@ def handle_search(user_query, top_k = 10, min_similarity = 0.05):
     response = summarize_results_with_llm(user_query, rows, memories)
     timings['Summarization'] = time.perf_counter() - start
 
-    start = time.perf_counter()
-    store_interaction(user_query, response)
-    timings['Memory store'] = time.perf_counter() - start
-
     timings['Total'] = time.perf_counter() - total_start
+
+    executor = ThreadPoolExecutor(max_workers=1)
+    executor.submit(store_interaction, user_query, response)
+    executor.shutdown(wait=False)
 
     return format_response_with_timings(response, timings)
 
