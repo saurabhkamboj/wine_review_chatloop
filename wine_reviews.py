@@ -3,11 +3,12 @@ import gradio as gr
 from openai import OpenAI
 from pydantic import BaseModel, Field
 from typing import Optional
-from database_helper import search_reviews
+from database_helper import search_reviews, init_pool
 from dotenv import load_dotenv
 from mem0 import MemoryClient
 
 load_dotenv()
+init_pool()
 llm_client = OpenAI()
 memory_client = MemoryClient()
 EMBEDDING_MODEL = 'text-embedding-3-small'

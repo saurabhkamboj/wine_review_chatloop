@@ -13,7 +13,10 @@ conn = psycopg2.connect(
 cur = conn.cursor()
 
 try:
+    # Extension
     cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+
+    # Table
     cur.execute("""
         CREATE TABLE IF NOT EXISTS reviews (
             id serial PRIMARY KEY,
@@ -32,6 +35,47 @@ try:
         );
     """)
     conn.commit()
+    print("Table created.")
+
+    # Indexes
+    print("Creating indexes...")
+
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_reviews_embedding_hnsw
+        ON reviews USING hnsw (embedding vector_cosine_ops)
+        WITH (m = 16, ef_construction = 64);
+    """)
+    conn.commit()
+    print("  - embedding (HNSW)")
+
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_reviews_taster_name_lower
+        ON reviews (LOWER(taster_name));
+    """)
+    conn.commit()
+    print("  - taster_name")
+
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_reviews_points
+        ON reviews (points);
+    """)
+    conn.commit()
+    print("  - points")
+
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_reviews_price
+        ON reviews (price) WHERE price IS NOT NULL;
+    """)
+    conn.commit()
+    print("  - price")
+
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_reviews_points_price
+        ON reviews (points DESC NULLS LAST, price NULLS LAST);
+    """)
+    conn.commit()
+    print("  - points_price")
+
     print("Database setup complete!")
 except Exception as e:
     print("Error during setup:", e)
