@@ -30,7 +30,8 @@ class QueryClassification(BaseModel):
 
 # Memory
 def get_relevant_memories(query):
-    memories = memory_client.search(query, user_id=USER_ID, limit=5)
+    filters = {'user_id': USER_ID}
+    memories = memory_client.search(query, filters=filters, top_k=5)
     if not memories.get('results'):
         return ''
     memory_texts = [m['memory'] for m in memories['results']]
