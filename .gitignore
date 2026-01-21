@@ -1,3 +1,6 @@
+.gitignore
 .env
 winemag-data-130k-v2.json
 plans/
+CLAUDE.md
+.claude/
