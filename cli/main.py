@@ -1,3 +1,9 @@
+import sys
+from pathlib import Path
+
+# Add project root to Python path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from concurrent.futures import ThreadPoolExecutor
 
 from dotenv import load_dotenv
@@ -181,6 +187,4 @@ def main():
     chatbot = WineChatbot()
     chatbot.run()
 
-
-if __name__ == '__main__':
-    main()
+main()

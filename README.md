@@ -1,11 +1,6 @@
-# Wine-review chatbot
+# Wine Review Chatbot
 
-A semantic search chatbot for exploring wine reviews.
-
-## Features
-
-- Search 130k wine reviews using natural language.
-- Semantic and keyword-based filtering using structured outputs.
+A CLI chatbot for exploring 130k+ wine reviews.
 
 ## Setup
 
@@ -15,23 +10,37 @@ A semantic search chatbot for exploring wine reviews.
     poetry install
     ```
 
-2. Set up your `.env` file with your OpenAI API key:
+2. Activate the virtual environment:
+
+    ```bash
+    eval $(poetry env activate)
+    ```
+
+3. Set up your `.env` file:
 
     ```bash
     OPENAI_API_KEY=your_api_key_here
+    MEM0_API_KEY=your_mem0_api_key_here
     ```
 
-3. Update the database connection settings in `setup_db.py` and `database_helper.py` with your PostgreSQL credentials (host, port, user, database name).
+4. Update the database connection settings in `setup_db.py` and `database_helper.py` with your PostgreSQL credentials (host, port, user, database name).
 
-4. Create and populate the PostgreSQL database:
+5. Create and populate the PostgreSQL database:
 
     ```bash
     python setup_db.py
     python load_embeddings.py
     ```
 
-5. Run the application:
+6. Run the application:
 
     ```bash
-    python wine_reviews.py
+    python cli/main.py
     ```
+
+## Commands
+
+- `/quit`, `/exit` - Exit the application
+- `/clear` - Clear conversation history
+- `/memories` - Show stored preferences
+- `/help` - Show help message
